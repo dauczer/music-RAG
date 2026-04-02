@@ -7,8 +7,15 @@ from sentence_transformers import SentenceTransformer
 from ingestion.build_chunks import build_chunks
 
 _DB_PATH = Path(__file__).parent.parent / "chroma_db"
-_model = SentenceTransformer("all-MiniLM-L6-v2")
+_model = None
 _client = chromadb.PersistentClient(path=str(_DB_PATH))
+
+
+def _get_model() -> SentenceTransformer:
+    global _model
+    if _model is None:
+        _model = SentenceTransformer("all-MiniLM-L6-v2")
+    return _model
 
 
 def _collection_name(artist_name: str) -> str:
@@ -33,7 +40,7 @@ def index_artist(artist_name: str) -> None:
     ids = [f"{artist_name}_{i}" for i in range(len(chunks))]
 
     print(f"Embedding {len(chunks)} chunks for {artist_name}...")
-    embeddings = _model.encode(texts, show_progress_bar=True).tolist()
+    embeddings = _get_model().encode(texts, show_progress_bar=True).tolist()
 
     collection.add(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
     print(f"Indexed {len(chunks)} chunks for {artist_name}")
@@ -46,7 +53,7 @@ def list_indexed_artists() -> list[str]:
 
 def rank_artists_by_relevance(query: str, top_n: int = 8) -> list[str]:
     """Return the top_n most relevant artist collection names for a given query."""
-    query_embedding = _model.encode([query])[0].tolist()
+    query_embedding = _get_model().encode([query])[0].tolist()
     scored = []
     for col in _client.list_collections():
         results = col.query(query_embeddings=[query_embedding], n_results=1)
@@ -62,7 +69,7 @@ def retrieve(artist_name: str, query: str, n_results: int = 4) -> list[str]:
     except Exception:
         raise ValueError(f"{artist_name} is not indexed. Call index_artist() first.")
 
-    query_embedding = _model.encode([query])[0].tolist()
+    query_embedding = _get_model().encode([query])[0].tolist()
     results = collection.query(query_embeddings=[query_embedding], n_results=n_results)
     return results["documents"][0]
 
