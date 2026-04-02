@@ -1,21 +1,33 @@
+import os
 import unicodedata
 from pathlib import Path
 
 import chromadb
+import requests
+from dotenv import load_dotenv
 
 from ingestion.build_chunks import build_chunks
 
+load_dotenv()
+
 _DB_PATH = Path(__file__).parent.parent / "chroma_db"
-_model = None
 _client = None
 
+_HF_API_URL = "https://router.huggingface.co/hf-inference/models/sentence-transformers/all-MiniLM-L6-v2/pipeline/feature-extraction"
 
-def _get_model():
-    global _model
-    if _model is None:
-        from sentence_transformers import SentenceTransformer
-        _model = SentenceTransformer("all-MiniLM-L6-v2")
-    return _model
+
+def _embed(texts: list[str]) -> list[list[float]]:
+    token = os.getenv("HF_TOKEN")
+    if not token:
+        raise EnvironmentError("HF_TOKEN is not set. Check your .env file.")
+    response = requests.post(
+        _HF_API_URL,
+        headers={"Authorization": f"Bearer {token}"},
+        json={"inputs": texts},
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()
 
 
 def _get_client() -> chromadb.PersistentClient:
@@ -31,7 +43,7 @@ def _collection_name(artist_name: str) -> str:
     return ascii_name.lower().replace(" ", "_")
 
 
-def index_artist(artist_name: str) -> None:
+def index_artist(artist_name: str) -> bool:
     collection = _get_client().get_or_create_collection(_collection_name(artist_name))
 
     if collection.count() > 0:
@@ -47,7 +59,7 @@ def index_artist(artist_name: str) -> None:
     ids = [f"{artist_name}_{i}" for i in range(len(chunks))]
 
     print(f"Embedding {len(chunks)} chunks for {artist_name}...")
-    embeddings = _get_model().encode(texts, show_progress_bar=True).tolist()
+    embeddings = _embed(texts)
 
     collection.add(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
     print(f"Indexed {len(chunks)} chunks for {artist_name}")
@@ -58,9 +70,8 @@ def list_indexed_artists() -> list[str]:
     return [col.name for col in _get_client().list_collections()]
 
 
-def rank_artists_by_relevance(query: str, top_n: int = 8) -> list[str]:
-    """Return the top_n most relevant artist collection names for a given query."""
-    query_embedding = _get_model().encode([query])[0].tolist()
+def rank_artists_by_relevance(query: str, top_n: int = 5) -> list[str]:
+    query_embedding = _embed([query])[0]
     scored = []
     for col in _get_client().list_collections():
         results = col.query(query_embeddings=[query_embedding], n_results=1)
@@ -76,7 +87,7 @@ def retrieve(artist_name: str, query: str, n_results: int = 4) -> list[str]:
     except Exception:
         raise ValueError(f"{artist_name} is not indexed. Call index_artist() first.")
 
-    query_embedding = _get_model().encode([query])[0].tolist()
+    query_embedding = _embed([query])[0]
     results = collection.query(query_embeddings=[query_embedding], n_results=n_results)
     return results["documents"][0]
 
