@@ -8,7 +8,7 @@ from ingestion.build_chunks import build_chunks
 
 _DB_PATH = Path(__file__).parent.parent / "chroma_db"
 _model = None
-_client = chromadb.PersistentClient(path=str(_DB_PATH))
+_client = None
 
 
 def _get_model() -> SentenceTransformer:
@@ -18,6 +18,13 @@ def _get_model() -> SentenceTransformer:
     return _model
 
 
+def _get_client() -> chromadb.PersistentClient:
+    global _client
+    if _client is None:
+        _client = chromadb.PersistentClient(path=str(_DB_PATH))
+    return _client
+
+
 def _collection_name(artist_name: str) -> str:
     normalized = unicodedata.normalize("NFD", artist_name)
     ascii_name = normalized.encode("ascii", "ignore").decode("ascii")
@@ -25,7 +32,7 @@ def _collection_name(artist_name: str) -> str:
 
 
 def index_artist(artist_name: str) -> None:
-    collection = _client.get_or_create_collection(_collection_name(artist_name))
+    collection = _get_client().get_or_create_collection(_collection_name(artist_name))
 
     if collection.count() > 0:
         print(f"{artist_name} already indexed ({collection.count()} chunks). Skipping.")
@@ -48,14 +55,14 @@ def index_artist(artist_name: str) -> None:
 
 
 def list_indexed_artists() -> list[str]:
-    return [col.name for col in _client.list_collections()]
+    return [col.name for col in _get_client().list_collections()]
 
 
 def rank_artists_by_relevance(query: str, top_n: int = 8) -> list[str]:
     """Return the top_n most relevant artist collection names for a given query."""
     query_embedding = _get_model().encode([query])[0].tolist()
     scored = []
-    for col in _client.list_collections():
+    for col in _get_client().list_collections():
         results = col.query(query_embeddings=[query_embedding], n_results=1)
         if results["distances"] and results["distances"][0]:
             scored.append((col.name, results["distances"][0][0]))
@@ -65,7 +72,7 @@ def rank_artists_by_relevance(query: str, top_n: int = 8) -> list[str]:
 
 def retrieve(artist_name: str, query: str, n_results: int = 4) -> list[str]:
     try:
-        collection = _client.get_collection(_collection_name(artist_name))
+        collection = _get_client().get_collection(_collection_name(artist_name))
     except Exception:
         raise ValueError(f"{artist_name} is not indexed. Call index_artist() first.")
 
