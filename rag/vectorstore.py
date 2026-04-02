@@ -70,16 +70,6 @@ def list_indexed_artists() -> list[str]:
     return [col.name for col in _get_client().list_collections()]
 
 
-def rank_artists_by_relevance(query: str, top_n: int = 5) -> list[str]:
-    query_embedding = _embed([query])[0]
-    scored = []
-    for col in _get_client().list_collections():
-        results = col.query(query_embeddings=[query_embedding], n_results=1)
-        if results["distances"] and results["distances"][0]:
-            scored.append((col.name, results["distances"][0][0]))
-    scored.sort(key=lambda x: x[1])
-    return [name for name, _ in scored[:top_n]]
-
 
 def retrieve(artist_name: str, query: str, n_results: int = 4) -> list[str]:
     try:

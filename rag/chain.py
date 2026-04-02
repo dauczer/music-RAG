@@ -1,9 +1,11 @@
+import json
 import os
+from difflib import get_close_matches
 
 from dotenv import load_dotenv
 from groq import Groq
 
-from rag.vectorstore import list_indexed_artists, rank_artists_by_relevance, retrieve
+from rag.vectorstore import _collection_name, list_indexed_artists, retrieve
 
 load_dotenv()
 
@@ -24,6 +26,14 @@ def _call_groq(prompt: str) -> str:
         return response.choices[0].message.content
     except Exception as e:
         raise RuntimeError(f"Groq API error: {e}") from e
+
+
+def _find_indexed_artist(name: str) -> str | None:
+    """Fuzzy-match a detected artist name against indexed collection slugs."""
+    slug = _collection_name(name)
+    indexed = list_indexed_artists()
+    matches = get_close_matches(slug, indexed, n=1, cutoff=0.8)
+    return matches[0] if matches else None
 
 
 def ask(artist_name: str, question: str) -> str:
@@ -58,19 +68,43 @@ Question: {question}"""
     return _call_groq(prompt)
 
 
-def ask_general(question: str) -> str:
-    if not list_indexed_artists():
-        return "No artists have been indexed yet."
-    top_artists = rank_artists_by_relevance(question, top_n=5)
-    all_chunks = []
-    for artist in top_artists:
-        all_chunks.extend(retrieve(artist, question, n_results=2))
-    context = "\n---\n".join(all_chunks)
-    prompt = f"""You are an expert music analyst. Answer using ONLY the song excerpts below.
-Do not use external knowledge. If the context is insufficient, say so.
+def route_and_ask(question: str) -> str:
+    indexed = list_indexed_artists()
+    artist_list = ", ".join(indexed)
 
-LYRICS CONTEXT:
-{context}
+    intent_prompt = f"""You are a routing assistant for a French rap chatbot. Given a question, extract:
+- mode: "single" if about one artist, "compare" if comparing two artists, "unknown" if unclear
+- artists: list of artist names mentioned (exact spelling from the question)
+
+Respond ONLY with valid JSON, no explanation.
+Examples:
+{{"mode": "single", "artists": ["Damso"]}}
+{{"mode": "compare", "artists": ["Booba", "Nekfeu"]}}
+{{"mode": "unknown", "artists": []}}
 
 Question: {question}"""
-    return _call_groq(prompt)
+
+    try:
+        raw = _call_groq(intent_prompt)
+        intent = json.loads(raw.strip().strip("```json").strip("```").strip())
+    except Exception:
+        return "Je n'ai pas compris ta question. Essaie par exemple : \"Quels sont les thèmes de Damso ?\" ou \"Compare Booba et Nekfeu\"."
+
+    mode = intent.get("mode", "unknown")
+    artists = intent.get("artists", [])
+
+    if mode == "single" and len(artists) >= 1:
+        match = _find_indexed_artist(artists[0])
+        if not match:
+            return f"Je n'ai pas de données sur \"{artists[0]}\". Artistes disponibles : {artist_list}."
+        return ask(match, question)
+
+    if mode == "compare" and len(artists) >= 2:
+        match1 = _find_indexed_artist(artists[0])
+        match2 = _find_indexed_artist(artists[1])
+        missing = [a for a, m in [(artists[0], match1), (artists[1], match2)] if not m]
+        if missing:
+            return f"Je n'ai pas de données sur {', '.join(missing)}. Artistes disponibles : {artist_list}."
+        return compare_artists(match1, match2, question)
+
+    return f"Je n'ai pas compris ta question. Essaie par exemple : \"Quels sont les thèmes de Damso ?\" ou \"Compare Booba et Nekfeu\". Artistes disponibles : {artist_list}."
