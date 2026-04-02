@@ -2,7 +2,6 @@ import unicodedata
 from pathlib import Path
 
 import chromadb
-from sentence_transformers import SentenceTransformer
 
 from ingestion.build_chunks import build_chunks
 
@@ -11,9 +10,10 @@ _model = None
 _client = None
 
 
-def _get_model() -> SentenceTransformer:
+def _get_model():
     global _model
     if _model is None:
+        from sentence_transformers import SentenceTransformer
         _model = SentenceTransformer("all-MiniLM-L6-v2")
     return _model
 
