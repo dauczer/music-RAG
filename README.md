@@ -1,6 +1,6 @@
 # Artist DNA — French Rap RAG
 
-Ask natural-language questions about French rap lyrics and get answers grounded in real songs, not hallucinations. The system scrapes ~200 songs per artist from Genius, embeds them into a vector database, and at query time retrieves the most relevant excerpts before sending them to an LLM that answers *only* from those lyrics.
+Ask natural-language questions about French rap lyrics and get answers grounded in real songs. The system scrapes ~200 songs per artist from Genius, embeds them into a vector database, and at query time retrieves the most relevant excerpts before sending them to an LLM that answers *only* from those lyrics.
 
 **Live API:** `https://music-rag.onrender.com`
 Free tier — first request after 15min of inactivity takes ~30s while the container wakes up.
@@ -13,16 +13,16 @@ Just type naturally. An LLM-based intent detector figures out whether you're ask
 
 ```
 # Single artist
-"Quels sont les thèmes principaux de Nekfeu ?"
-"Comment Damso parle-t-il de la mort ?"
+"What are the main themes of Nekfeu ?"
+"How does Damso mention death ?"
 
 # Cross-artist comparison
-"Compare Booba et Orelsan sur la thématique de la réussite"
-"Compare la vision de la rue chez SCH et Kaaris"
+"Compare Booba and Orelsan on success thematic"
+"Compare the street vision in SCH and Kaaris"
 
 # Unknown artist → helpful error
-"Parle moi de Jul"
-→ "Je n'ai pas de données sur Jul. Artistes disponibles : ..."
+"Tell me about Jul"
+→ "I don't have Jul informations. Artists available : ..."
 ```
 
 ---
