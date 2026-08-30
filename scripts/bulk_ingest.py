@@ -6,10 +6,13 @@ Usage:
     python -m scripts.bulk_ingest
 """
 
+import logging
 from pathlib import Path
 
 from ingestion.genius_scraper import scrape_artist
 from rag.vectorstore import index_artist
+
+logger = logging.getLogger(__name__)
 
 ARTISTS = [
     "MC Solaar",
@@ -45,31 +48,36 @@ def _already_scraped(artist: str) -> bool:
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
     failed = []
 
     for i, artist in enumerate(ARTISTS, 1):
-        print(f"\n[{i}/{len(ARTISTS)}] {artist}")
-        print("-" * 40)
+        logger.info("[%d/%d] %s", i, len(ARTISTS), artist)
+        logger.info("-" * 40)
 
         try:
             if _already_scraped(artist):
-                print(f"  Scraping skipped — data/raw/{artist}_lyrics.json already exists")
+                logger.info("Scraping skipped — data/raw/%s_lyrics.json already exists", artist)
             else:
                 scrape_artist(artist, max_songs=200)
 
             index_artist(artist)
 
         except Exception as e:
-            print(f"  ERROR: {e}")
+            logger.error("ERROR processing %s: %s", artist, e)
             failed.append((artist, str(e)))
             continue
 
-    print("\n" + "=" * 40)
-    print(f"Done. {len(ARTISTS) - len(failed)}/{len(ARTISTS)} artists ingested.")
+    logger.info("=" * 40)
+    logger.info("Done. %d/%d artists ingested.", len(ARTISTS) - len(failed), len(ARTISTS))
     if failed:
-        print("Failed:")
+        logger.warning("Failed artists:")
         for artist, err in failed:
-            print(f"  - {artist}: {err}")
+            logger.warning("  - %s: %s", artist, err)
 
 
 if __name__ == "__main__":

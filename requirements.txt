@@ -1,8 +1,9 @@
-requests==2.32.3
+requests==2.34.2
 beautifulsoup4==4.13.4
-huggingface-hub
-chromadb==1.5.5
-groq
-fastapi==0.115.12
-uvicorn==0.34.0
-python-dotenv==1.1.0
+huggingface-hub==0.36.2
+chromadb==1.5.9
+groq==1.7.0
+fastapi==0.141.1
+uvicorn==0.52.4
+python-dotenv==1.2.3
+slowapi==0.1.9

@@ -4,3 +4,25 @@ __pycache__/
 *.pyo
 .DS_Store
 venv/
+# IDE
+.idea/
+.vscode/
+# build artifacts
+*.egg-info/
+dist/
+build/
+# test / lint caches
+.pytest_cache/
+.ruff_cache/
+# scraped raw data (vectors in chroma_db/ are the runtime source of truth)
+data/raw/
+# project dev notes — keep locally, not needed in the deployed repo
+CLAUDE.md
+PROJECT_DEEP_DIVE.md
+plan.md
+review.md
+# cached credentials from spotify_fetcher (defunct)
+.cache
+# evals scratch
+evals/__pycache__/
+evals/runs/

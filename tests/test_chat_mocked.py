@@ -1,4 +1,4 @@
-"""Baseline test: /chat happy path with Groq monkeypatched."""
+"""The portfolio chat endpoint returns its complete public contract."""
 
 from unittest.mock import patch
 
@@ -8,15 +8,16 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture()
 def client():
-    with (
-        patch("rag.chain._call_groq", return_value="Damso parle souvent de la solitude."),
-        patch(
-            "rag.chain.retrieve",
-            return_value=["chunk1", "chunk2"],
-        ),
-    ):
-        from api.main import app
+    from api.main import app
+    from rag.chain import ArtistRef, RagResult, RagSource
 
+    result = RagResult(
+        status="answered",
+        answer="Damso parle souvent de la solitude.",
+        artist=ArtistRef(slug="damso", name="Damso"),
+        sources=[RagSource(id="damso:song-0001", artist="Damso", title="Mort")],
+    )
+    with patch("api.main.ask_result", return_value=result):
         yield TestClient(app)
 
 
@@ -24,5 +25,7 @@ def test_chat_returns_answer(client):
     resp = client.post("/chat", json={"artist": "Damso", "question": "quels sont ses thèmes?"})
     assert resp.status_code == 200
     data = resp.json()
-    assert "answer" in data
-    assert len(data["answer"]) > 0
+    assert data["status"] == "answered"
+    assert data["artist"] == {"slug": "damso", "name": "Damso"}
+    assert data["sources"][0]["title"] == "Mort"
+    assert data["request_id"]
