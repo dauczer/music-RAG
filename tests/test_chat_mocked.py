@@ -13,8 +13,9 @@ def client():
 
     result = RagResult(
         status="answered",
+        mode="single",
         answer="Damso parle souvent de la solitude.",
-        artist=ArtistRef(slug="damso", name="Damso"),
+        artists=[ArtistRef(slug="damso", name="Damso")],
         sources=[RagSource(id="damso:song-0001", artist="Damso", title="Mort")],
     )
     with patch("api.main.ask_result", return_value=result):

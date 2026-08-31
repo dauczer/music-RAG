@@ -70,7 +70,7 @@ def test_retrieve_across_artists_embeds_shared_query_once(monkeypatch):
     monkeypatch.setattr(
         vectorstore,
         "retrieve_chunks",
-        lambda artist, query, n_results, query_embedding: [
+        lambda artist, query, n_results, query_embedding, match_title: [
             (artist, query, n_results, query_embedding)
         ],
     )
@@ -80,3 +80,42 @@ def test_retrieve_across_artists_embeds_shared_query_once(monkeypatch):
     assert calls == [["la réussite"]]
     assert [result[0][0] for result in results] == ["booba", "orelsan"]
     assert all(result[0][3] == [0.1, 0.2] for result in results)
+
+
+def _chunk(artist: str, song: int, distance: float) -> vectorstore.RetrievedChunk:
+    slug = artist.casefold()
+    return vectorstore.RetrievedChunk(
+        id=f"{slug}:song-{song:04d}:chunk-000",
+        document="lyrics",
+        artist=artist,
+        title=f"Song {song}",
+        album=None,
+        year=None,
+        chunk_index=0,
+        distance=distance,
+    )
+
+
+def test_global_retrieval_merges_by_distance_with_artist_diversity(monkeypatch):
+    monkeypatch.setattr(vectorstore, "list_indexed_artists", lambda: ["A", "B", "C"])
+    monkeypatch.setattr(
+        vectorstore,
+        "retrieve_across_artists",
+        lambda artists, query, n_results, match_titles: [
+            [_chunk("A", 1, 0.10), _chunk("A", 2, 0.11)],
+            [_chunk("B", 1, 0.12), _chunk("B", 2, 0.13)],
+            [_chunk("C", 1, 0.14), _chunk("C", 2, 0.15)],
+        ],
+    )
+
+    chunks = vectorstore.retrieve_global_chunks(
+        "question",
+        n_results=4,
+        max_chunks_per_artist=1,
+    )
+
+    assert [(chunk.artist, chunk.title) for chunk in chunks] == [
+        ("A", "Song 1"),
+        ("B", "Song 1"),
+        ("C", "Song 1"),
+    ]

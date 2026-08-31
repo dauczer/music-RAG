@@ -9,7 +9,7 @@ Free tier — first request after 15min of inactivity takes ~30s while the conta
 
 ## What you can ask
 
-Just type naturally. An LLM-based intent detector figures out whether you're asking about one artist, comparing two, or asking about someone who isn't indexed — no buttons, no mode selection.
+Just type naturally. The API detects indexed artist names locally: one artist gives a targeted answer, several artists trigger a comparison, and no artist searches the complete 22-artist corpus — no buttons or mode selection.
 
 ```
 # Single artist
@@ -20,9 +20,9 @@ Just type naturally. An LLM-based intent detector figures out whether you're ask
 "Compare Booba and Orelsan on success thematic"
 "Compare the street vision in Booba and Kaaris"
 
-# Unknown artist → helpful error
-"Tell me about Jul"
-→ "I don't have Jul informations. Artists available : ..."
+# Whole-corpus exploration
+"Which artists write about solitude, and how?"
+"How do French rappers describe success?"
 ```
 
 ---
@@ -46,19 +46,19 @@ QUERY (real-time, POST /ask)
   User question
        │
        ▼
-  Intent detection (Groq / gpt-oss-120b)  ──►  {mode: "single", artists: ["Damso"]}
+  Local artist detection  ──►  single / compare / global
        │
        ▼
-  Fuzzy match artist name against indexed collections
+  Embed query once (HuggingFace Inference API)
        │
        ▼
-  Embed query (HuggingFace Inference API)  ──►  ChromaDB similarity search  ──►  top 5 chunks
+  ChromaDB local search  ──►  targeted top 5 or global diversified top 8
        │
        ▼
   Build prompt with retrieved lyrics  ──►  Groq / gpt-oss-120b  ──►  grounded answer + sources
 ```
 
-`POST /ask` makes three external calls: intent detection, query embedding, and answer generation. The portfolio uses `POST /chat`, where the artist is already selected, so it skips intent detection and makes only two. A comparison reuses one query embedding for both artists. ChromaDB search itself is local.
+Every `POST /ask` request normally makes two external calls: one query embedding and one answer generation. Artist detection is local, and the same embedding is reused whether one, several, or all 22 local Chroma collections are searched.
 
 ---
 
@@ -93,13 +93,13 @@ The current raw corpus contains about 3,300 songs. The public `/artists` endpoin
 |--------|----------|------|-------------|
 | `GET` | `/health` | — | Health check |
 | `GET` | `/artists` | — | Non-empty indexed artists and song counts |
-| `POST` | `/ask` | `{"question": "..."}` | **Main endpoint** — free-text input, auto-detects intent and routes |
-| `POST` | `/chat` | `{"artist": "Damso", "question": "..."}` | Portfolio endpoint — structured answer, status, artist and sources |
-| `POST` | `/compare` | `{"artist1": "...", "artist2": "...", "question": "..."}` | Direct comparison query (skips intent detection) |
+| `POST` | `/ask` | `{"question": "..."}` | **Main and portfolio endpoint** — automatically routes to single, comparison or global retrieval and returns scope plus sources |
+| `POST` | `/chat` | `{"artist": "Damso", "question": "..."}` | Backward-compatible targeted endpoint |
+| `POST` | `/compare` | `{"artist1": "...", "artist2": "...", "question": "..."}` | Explicit comparison endpoint with the same structured response as `/ask` |
 
 All input fields are validated with a maximum of 500 characters. Generation endpoints default to three requests per minute and IP; the limit can be configured with `DEMO_RATE_LIMIT`. Interactive docs are available at `/docs`.
 
-Three endpoints instead of one because `/ask` is the "smart" endpoint for end users, while `/chat` and `/compare` let the frontend skip the intent detection LLM call when it already knows what the user wants.
+`/ask` is the primary public contract. `/chat` and `/compare` remain available for compatibility and explicit API use; they do not reduce the number of model-provider calls because routing is already local.
 
 ---
 
@@ -113,11 +113,14 @@ It's ~82MB of binary data in version control, which isn't pretty. But it means R
 
 The rebuilt index keeps passage text in a compressed `passages.json.gz` file beside Chroma instead of duplicating it in SQLite. Chroma contains only vectors and metadata. A local full-corpus measurement reduced the staged index from about 188 MiB to about 48 MiB while preserving all 15,496 passages.
 
-**Intent detection via LLM instead of regex**
-Regex would handle "Compare X and Y" but fail on "What's the difference between X's style and Y's approach?" The LLM handles arbitrary phrasing. It costs one extra API call (~200ms) but enables a much more natural UX. The output is validated with Pydantic — if the LLM returns garbage, the system falls back gracefully with a helpful message instead of crashing.
+**Deterministic routing without an extra LLM call**
+Indexed names and a few unambiguous aliases are matched directly in the question, with conservative typo tolerance. One match selects that artist, several matches define a comparison scope, and no match searches the full corpus. This keeps the natural-language interface while every normal request stays at one Hugging Face call and one Groq call.
 
-**Fuzzy matching with 0.8 cutoff**
-Users type artist names inconsistently ("damso", "Damso", "DAMSO", "Boba"). The slug normalization handles casing and accents (NFD unicode normalization); `difflib.get_close_matches` with cutoff 0.8 handles typos. "Boba" matches "booba" (87% similar), but "xyz" doesn't match anything. The threshold balances tolerance with precision.
+**Diversified global retrieval**
+Global questions reuse one embedding across all 22 collections. The best local candidates are merged by vector distance, deduplicated by track, capped at two passages per artist, and reduced to eight passages before generation. The cap prevents a single artist from occupying the complete context.
+
+**Conservative fuzzy matching**
+Users type artist names inconsistently ("damso", "Damso", "DAMSO", "Boba"). Normalization handles casing and accents; automatic routing accepts a typo only when one candidate clears a high similarity threshold and is clearly better than the next. Explicit endpoints keep the broader 0.8 fuzzy match for backward compatibility.
 
 **Overlapping passages instead of one vector per song**
 Songs are split into 160-word windows with a 30-word overlap. This fits comfortably within multilingual-e5-small's 512-token context while preserving precise passages for retrieval. Every passage repeats artist, title, album and year metadata, and keeps stable song/chunk identifiers for source display.
@@ -191,7 +194,7 @@ music-RAG/
 │   └── rebuild_index.py    # Safe staged rebuild after chunking changes
 ├── evals/
 │   ├── run.py              # Source-based Hit@5 and MRR@5 evaluation
-│   └── questions.jsonl     # 18 hand-written retrieval/failure cases
+│   └── questions.jsonl     # 20 hand-written retrieval/failure cases
 ├── tests/                  # API, retrieval-contract and chunking tests
 ├── data/raw/               # Scraped lyrics JSON (not committed)
 ├── chroma_db/              # Persisted vector store (committed)

@@ -13,14 +13,15 @@ def client():
 
     result = RagResult(
         status="answered",
+        mode="single",
         answer="stub",
-        artist=ArtistRef(slug="damso", name="Damso"),
+        artists=[ArtistRef(slug="damso", name="Damso")],
         sources=[],
     )
     with (
         patch("api.main.ask_result", MagicMock(return_value=result)),
-        patch("api.main.compare_artists", MagicMock(return_value="stub")),
-        patch("api.main.route_and_ask", MagicMock(return_value="stub")),
+        patch("api.main.compare_result", MagicMock(return_value=result)),
+        patch("api.main.route_and_ask_result", MagicMock(return_value=result)),
     ):
         yield TestClient(app)
 

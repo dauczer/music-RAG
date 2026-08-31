@@ -15,7 +15,7 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
-from rag.vectorstore import list_artist_summaries, retrieve_chunks
+from rag.vectorstore import list_artist_summaries, retrieve_chunks, retrieve_global_chunks
 
 QUESTIONS_PATH = Path(__file__).parent / "questions.jsonl"
 
@@ -40,6 +40,20 @@ def _first_relevant_rank(retrieved_titles: list[str], expected_titles: list[str]
     return None
 
 
+def _first_relevant_global_rank(
+    retrieved: list[tuple[str, str]], expected_sources: dict[str, list[str]]
+) -> int | None:
+    expected = {
+        (_normalize(artist), _normalize(title))
+        for artist, titles in expected_sources.items()
+        for title in titles
+    }
+    for rank, source in enumerate(retrieved, 1):
+        if (_normalize(source[0]), _normalize(source[1])) in expected:
+            return rank
+    return None
+
+
 def run_eval(top_k: int) -> dict:
     questions = _load_questions()
     checks: list[dict] = []
@@ -49,6 +63,36 @@ def run_eval(top_k: int) -> dict:
         expected_sources = case.get("expected_sources", {})
         if not expected_sources:
             skipped += 1
+            continue
+
+        if case.get("mode") == "global":
+            try:
+                chunks = retrieve_global_chunks(case["question"], n_results=top_k)
+                retrieved = [(chunk.artist, chunk.title) for chunk in chunks]
+                distances = [chunk.distance for chunk in chunks]
+                error = None
+            except (RuntimeError, ValueError) as exc:
+                retrieved = []
+                distances = []
+                error = str(exc)
+
+            rank = _first_relevant_global_rank(retrieved, expected_sources)
+            checks.append(
+                {
+                    "case_id": case["id"],
+                    "category": case["category"],
+                    "artist": "all",
+                    "hit": rank is not None,
+                    "rank": rank,
+                    "reciprocal_rank": 1 / rank if rank else 0,
+                    "expected_sources": expected_sources,
+                    "retrieved": [
+                        {"artist": artist, "title": title, "distance": distance}
+                        for (artist, title), distance in zip(retrieved, distances, strict=True)
+                    ],
+                    "error": error,
+                }
+            )
             continue
 
         for artist, expected_titles in expected_sources.items():

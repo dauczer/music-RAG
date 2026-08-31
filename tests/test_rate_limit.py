@@ -13,8 +13,9 @@ def client():
 
     result = RagResult(
         status="answered",
+        mode="single",
         answer="stub",
-        artist=ArtistRef(slug="damso", name="Damso"),
+        artists=[ArtistRef(slug="damso", name="Damso")],
         sources=[],
     )
     with patch("api.main.ask_result", MagicMock(return_value=result)):

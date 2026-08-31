@@ -286,6 +286,7 @@ def retrieve_chunks(
     n_results: int = 5,
     *,
     query_embedding: list[float] | None = None,
+    match_title: bool = True,
 ) -> list[RetrievedChunk]:
     try:
         collection = _get_client().get_collection(_collection_name(artist_name))
@@ -304,7 +305,7 @@ def retrieve_chunks(
     )
 
     rows = _query_rows(dense_results)
-    matched_title = _matching_title(collection, query)
+    matched_title = _matching_title(collection, query) if match_title else None
     if matched_title:
         title_count = len(
             collection.get(where={"title": {"$eq": matched_title}}, include=[]).get("ids", [])
@@ -348,7 +349,11 @@ def retrieve_chunks(
 
 
 def retrieve_across_artists(
-    artist_names: list[str], query: str, n_results: int = 4
+    artist_names: list[str],
+    query: str,
+    n_results: int = 4,
+    *,
+    match_titles: bool = True,
 ) -> list[list[RetrievedChunk]]:
     """Retrieve for several artists while embedding the shared query only once."""
     query_embedding = _embed_queries([query])[0]
@@ -358,9 +363,55 @@ def retrieve_across_artists(
             query,
             n_results,
             query_embedding=query_embedding,
+            match_title=match_titles,
         )
         for artist_name in artist_names
     ]
+
+
+def retrieve_global_chunks(
+    query: str,
+    *,
+    n_results: int = 8,
+    candidates_per_artist: int = 2,
+    max_chunks_per_artist: int = 2,
+) -> list[RetrievedChunk]:
+    """Search every indexed artist with one query embedding and merge fairly."""
+    if n_results < 1 or candidates_per_artist < 1 or max_chunks_per_artist < 1:
+        raise ValueError("Global retrieval limits must be positive integers.")
+
+    artist_names = list_indexed_artists()
+    if not artist_names:
+        return []
+
+    grouped = retrieve_across_artists(
+        artist_names,
+        query,
+        n_results=candidates_per_artist,
+        match_titles=False,
+    )
+    candidates = sorted(
+        (chunk for chunks in grouped for chunk in chunks),
+        key=lambda chunk: float("inf") if chunk.distance is None else chunk.distance,
+    )
+
+    selected: list[RetrievedChunk] = []
+    seen_songs: set[str] = set()
+    chunks_per_artist: dict[str, int] = {}
+    for chunk in candidates:
+        artist_key = _collection_name(chunk.artist)
+        if chunk.source_id in seen_songs:
+            continue
+        if chunks_per_artist.get(artist_key, 0) >= max_chunks_per_artist:
+            continue
+
+        selected.append(chunk)
+        seen_songs.add(chunk.source_id)
+        chunks_per_artist[artist_key] = chunks_per_artist.get(artist_key, 0) + 1
+        if len(selected) == n_results:
+            break
+
+    return selected
 
 
 def retrieve(artist_name: str, query: str, n_results: int = 4) -> list[str]:

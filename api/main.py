@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Literal
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -11,7 +12,14 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from rag.chain import RagResult, ask_result, compare_artists, route_and_ask
+from rag.chain import (
+    ArtistRef,
+    RagResult,
+    RagSource,
+    ask_result,
+    compare_result,
+    route_and_ask_result,
+)
 from rag.vectorstore import list_artist_summaries
 
 load_dotenv()
@@ -74,7 +82,15 @@ class CompareRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=500)
 
 
-class ChatResponse(RagResult):
+class AskResponse(RagResult):
+    request_id: str
+
+
+class ChatResponse(BaseModel):
+    status: Literal["answered", "insufficient"]
+    answer: str
+    artist: ArtistRef
+    sources: list[RagSource]
     request_id: str
 
 
@@ -103,14 +119,16 @@ def artists() -> ArtistsResponse:
     )
 
 
-@app.post("/ask")
+@app.post("/ask", response_model=AskResponse)
 @limiter.limit(_demo_rate_limit)
-def ask_endpoint(request: Request, req: AskRequest):
+def ask_endpoint(request: Request, req: AskRequest) -> AskResponse:
     try:
-        answer = route_and_ask(req.question)
+        result = route_and_ask_result(req.question)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
-    return {"answer": answer}
+    return AskResponse(**result.model_dump(), request_id=str(uuid4()))
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -122,16 +140,22 @@ def chat(request: Request, req: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
-    return ChatResponse(**result.model_dump(), request_id=str(uuid4()))
+    return ChatResponse(
+        status=result.status,
+        answer=result.answer,
+        artist=result.artists[0],
+        sources=result.sources,
+        request_id=str(uuid4()),
+    )
 
 
-@app.post("/compare")
+@app.post("/compare", response_model=AskResponse)
 @limiter.limit(_demo_rate_limit)
-def compare(request: Request, req: CompareRequest):
+def compare(request: Request, req: CompareRequest) -> AskResponse:
     try:
-        answer = compare_artists(req.artist1, req.artist2, req.question)
+        result = compare_result([req.artist1, req.artist2], req.question)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
-    return {"answer": answer}
+    return AskResponse(**result.model_dump(), request_id=str(uuid4()))
